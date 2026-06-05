@@ -37,10 +37,10 @@ curl -sS http://127.0.0.1:3000/api/v1/profile | python3 -m json.tool
 
 | Type | Name | Example |
 |------|------|---------|
-| **Variable** | `STAGING_API_URL` | `https://guard-onboarding-backend-sandbox.onrender.com` |
+| **Variable** (preferred) or **Secret** | `STAGING_API_URL` | `https://guard-onboarding-backend-sandbox.onrender.com` |
 | **Secret** | `STAGING_DEPLOY_HOOK` | Render deploy hook URL |
 
-**Critical:** `STAGING_API_URL` must be a **Variable**, not a Secret.
+**Note:** CI accepts `STAGING_API_URL` as either a Variable or Secret. Variable is preferred since the URL is not sensitive.
 
 4. Push to `main` and verify Actions: `test → deploy-staging`.
 

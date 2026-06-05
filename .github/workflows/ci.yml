@@ -47,14 +47,15 @@ jobs:
 
       - name: Verify /api/health gitSha matches deployed commit
         env:
-          API_URL: ${{ vars.STAGING_API_URL }}
+          # Prefer Variable; fall back to Secret (common setup mistake).
+          API_URL: ${{ vars.STAGING_API_URL || secrets.STAGING_API_URL }}
           EXPECTED_SHA: ${{ github.sha }}
         run: |
           API_URL="${API_URL%/}"
           if [ -z "$API_URL" ]; then
-            echo "::error::Missing STAGING_API_URL variable."
-            echo "Set as GitHub Actions Variable (not Secret):"
-            echo "  Repo → Settings → Secrets and variables → Actions → Variables"
+            echo "::error::Missing STAGING_API_URL."
+            echo "Set as GitHub Actions Variable (preferred) or Secret:"
+            echo "  Repo → Settings → Secrets and variables → Actions"
             echo "  Name: STAGING_API_URL"
             echo "  Value: https://your-service.onrender.com"
             exit 1
