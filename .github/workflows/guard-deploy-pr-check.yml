@@ -96,6 +96,7 @@ jobs:
     env:
       PROXYHAWK_API_BASE_URL: ${{ vars.PROXYHAWK_API_BASE_URL || secrets.PROXYHAWK_API_BASE_URL || 'https://api.proxyhawk.io' }}
       PROXYHAWK_OIDC_AUDIENCE: ${{ vars.PROXYHAWK_OIDC_AUDIENCE || 'https://api.proxyhawk.io' }}
+      PROXYHAWK_GUARD_TROUBLESHOOTING_URL: https://proxyhawk.io/docs/guard-ci-existing-pipeline.html#troubleshooting
     outputs:
       guard_outcome: ${{ steps.outcome.outputs.guard_outcome }}
       guard_session_id: ${{ steps.mapping.outputs.guard_session_id }}
@@ -206,6 +207,7 @@ jobs:
           token=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('accessToken',''))" 2>/dev/null || true)
           if [ -z "$token" ]; then
             echo "Login failed: $body"
+            echo "Troubleshooting: ${PROXYHAWK_GUARD_TROUBLESHOOTING_URL}"
             exit 1
           fi
           echo "::add-mask::$token"
@@ -235,6 +237,7 @@ jobs:
           if [ "$code" != "200" ]; then
             echo "Mapping resolve failed (HTTP $code)"
             cat mapping.json || true
+            echo "Troubleshooting: ${PROXYHAWK_GUARD_TROUBLESHOOTING_URL}"
             exit 1
           fi
 
@@ -257,6 +260,7 @@ jobs:
         if: steps.mapping.outputs.matched != 'true'
         run: |
           echo "ProxyHawk Guard checkpoint failed: no active mapping for repo/environment."
+          echo "Troubleshooting: ${PROXYHAWK_GUARD_TROUBLESHOOTING_URL}"
           exit 1
 
       - name: Notify backend deployment event
@@ -301,16 +305,26 @@ jobs:
           fi
           if [ -z "$RUNNER_URL" ]; then
             echo "No runner URL provided — requesting short-lived signed URL from backend."
-            signed_url=$(curl -sS \
+            runner_resp="$(mktemp)"
+            http_code=$(curl -sS -o "$runner_resp" -w "%{http_code}" \
               -H "Authorization: Bearer ${PROXYHAWK_API_TOKEN}" \
               -H "ngrok-skip-browser-warning: true" \
-              "${PROXYHAWK_API_BASE_URL%/}/api/v1/guard/runner/download-url?platform=linux-amd64" \
-              | python3 -c "import sys,json; print(json.load(sys.stdin).get('downloadUrl',''))" 2>/dev/null || true)
+              "${PROXYHAWK_API_BASE_URL%/}/api/v1/guard/runner/download-url?platform=linux-amd64")
+            signed_url=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('downloadUrl',''))" "$runner_resp" 2>/dev/null || true)
             if [ -z "$signed_url" ]; then
-              echo "Failed to obtain signed runner URL."
-              echo "Set PROXYHAWK_GUARD_RUNNER_URL secret/variable as fallback."
+              echo "Failed to obtain signed runner URL (HTTP ${http_code})."
+              cat "$runner_resp" || true
+              echo ""
+              echo "Common causes:"
+              echo "  • Render/Railway missing PROXYHAWK_GUARD_RUNNER_SIGNING_SECRET"
+              echo "  • Runner binary path not configured on backend (redeploy backend Docker image)"
+              echo "  • Plan missing guard_api_regression entitlement"
+              echo "Fallback: set PROXYHAWK_GUARD_RUNNER_URL secret/variable to a direct .tar.gz or binary URL."
+              echo "Troubleshooting: ${PROXYHAWK_GUARD_TROUBLESHOOTING_URL}"
+              rm -f "$runner_resp"
               exit 1
             fi
+            rm -f "$runner_resp"
             RUNNER_URL="$signed_url"
           fi
 
@@ -408,7 +422,6 @@ jobs:
               elif "NEW RESPONSE FIELD(S) DETECTED" in line or "Review Now to accept" in line:
                   print(line)
           if not fields:
-              # Also match runner summary lines: • `organization` on GET ...
               for line in log.splitlines():
                   m = re.match(r"\s*• `([^`]+)` on ", line)
                   if m:
@@ -544,76 +557,6 @@ jobs:
             "$url")
           echo "http_code=$code" >> "$GITHUB_OUTPUT"
 
-      - name: Notify Guard dashboard (SSE)
-        if: steps.mapping.outputs.matched == 'true' && steps.ctx.outputs.run_mode == 'headless'
-        env:
-          PROXYHAWK_API_BASE_URL: ${{ vars.PROXYHAWK_API_BASE_URL || secrets.PROXYHAWK_API_BASE_URL || 'https://api.proxyhawk.io' }}
-          GUARD_SESSION_ID: ${{ steps.mapping.outputs.guard_session_id }}
-        run: |
-          python3 - <<'PY'
-          import json, os, pathlib, urllib.request
-
-          sid = os.environ["GUARD_SESSION_ID"].strip()
-          api = os.environ["PROXYHAWK_API_BASE_URL"].rstrip("/")
-          token = os.environ["PROXYHAWK_API_TOKEN"]
-
-          fields = []
-          fields_path = pathlib.Path("guard_new_fields.txt")
-          if fields_path.is_file():
-              fields = [ln.strip() for ln in fields_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
-
-          broken = errors = ok = 0
-          session_name = "Guard Session"
-          latest = pathlib.Path("guard_latest_run.json")
-          if latest.is_file():
-              payload = json.loads(latest.read_text(encoding="utf-8"))
-              broken = int(payload.get("brokenCount", 0))
-              errors = int(payload.get("errorCount", 0))
-              ok = int(payload.get("okCount", 0))
-              session_name = payload.get("sessionName") or session_name
-
-          if broken or errors:
-              outcome = "failing"
-          elif fields:
-              outcome = "review"
-          else:
-              print("No SSE notification needed.")
-              raise SystemExit(0)
-
-          body = {
-              "sessionId": sid,
-              "sessionName": session_name,
-              "outcome": outcome,
-              "brokenCount": broken,
-              "errorCount": errors,
-              "okCount": ok,
-              "newResponseFields": fields,
-              "source": "ci",
-          }
-          if fields:
-              body["message"] = (
-                  "New response field(s): "
-                  + ", ".join(fields)
-                  + ". Open Guard Dashboard → Review Now to accept into your contract."
-              )
-          else:
-              body["message"] = "Deploy checkpoint failed. Open Guard Dashboard to review."
-
-          req = urllib.request.Request(
-              f"{api}/api/v1/guard/events/checkpoint",
-              data=json.dumps(body).encode("utf-8"),
-              headers={
-                  "Authorization": f"Bearer {token}",
-                  "Content-Type": "application/json",
-                  "ngrok-skip-browser-warning": "true",
-              },
-              method="POST",
-          )
-          with urllib.request.urlopen(req) as resp:
-              print(f"SSE publish HTTP {resp.status}")
-              print(resp.read().decode("utf-8", errors="replace"))
-          PY
-
       - name: Build PR comment
         if: steps.latest.outputs.http_code == '200'
         run: |
@@ -654,6 +597,7 @@ jobs:
         run: |
           echo "ProxyHawk Guard checkpoint failed: latest run not available (HTTP ${{ steps.latest.outputs.http_code }})."
           echo "Ensure the headless Guard runner submits run results before this checkpoint evaluates."
+          echo "Troubleshooting: ${PROXYHAWK_GUARD_TROUBLESHOOTING_URL}"
           exit 1
 
       - name: Upsert PR comment
