@@ -12,6 +12,7 @@ app.get("/api/health", (_req, res) => {
   res.json({
     status: "ok",
     service: "guard-onboarding-backend-sandbox",
+    version: "0.1.1",
     gitSha,
   });
 });

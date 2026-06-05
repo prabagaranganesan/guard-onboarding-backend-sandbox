@@ -1,6 +1,6 @@
 {
   "name": "guard-onboarding-backend-sandbox",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Minimal API to test ProxyHawk Guard two-phase onboarding",
   "main": "server.js",
   "scripts": {
