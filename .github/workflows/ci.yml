@@ -83,6 +83,10 @@ jobs:
   guard-staging:
     needs: deploy-staging
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
     uses: ./.github/workflows/guard-post-backend-deploy.yml
     with:
       environment: staging
