@@ -544,6 +544,76 @@ jobs:
             "$url")
           echo "http_code=$code" >> "$GITHUB_OUTPUT"
 
+      - name: Notify Guard dashboard (SSE)
+        if: steps.mapping.outputs.matched == 'true' && steps.ctx.outputs.run_mode == 'headless'
+        env:
+          PROXYHAWK_API_BASE_URL: ${{ vars.PROXYHAWK_API_BASE_URL || secrets.PROXYHAWK_API_BASE_URL || 'https://api.proxyhawk.io' }}
+          GUARD_SESSION_ID: ${{ steps.mapping.outputs.guard_session_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, urllib.request
+
+          sid = os.environ["GUARD_SESSION_ID"].strip()
+          api = os.environ["PROXYHAWK_API_BASE_URL"].rstrip("/")
+          token = os.environ["PROXYHAWK_API_TOKEN"]
+
+          fields = []
+          fields_path = pathlib.Path("guard_new_fields.txt")
+          if fields_path.is_file():
+              fields = [ln.strip() for ln in fields_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+
+          broken = errors = ok = 0
+          session_name = "Guard Session"
+          latest = pathlib.Path("guard_latest_run.json")
+          if latest.is_file():
+              payload = json.loads(latest.read_text(encoding="utf-8"))
+              broken = int(payload.get("brokenCount", 0))
+              errors = int(payload.get("errorCount", 0))
+              ok = int(payload.get("okCount", 0))
+              session_name = payload.get("sessionName") or session_name
+
+          if broken or errors:
+              outcome = "failing"
+          elif fields:
+              outcome = "review"
+          else:
+              print("No SSE notification needed.")
+              raise SystemExit(0)
+
+          body = {
+              "sessionId": sid,
+              "sessionName": session_name,
+              "outcome": outcome,
+              "brokenCount": broken,
+              "errorCount": errors,
+              "okCount": ok,
+              "newResponseFields": fields,
+              "source": "ci",
+          }
+          if fields:
+              body["message"] = (
+                  "New response field(s): "
+                  + ", ".join(fields)
+                  + ". Open Guard Dashboard → Review Now to accept into your contract."
+              )
+          else:
+              body["message"] = "Deploy checkpoint failed. Open Guard Dashboard to review."
+
+          req = urllib.request.Request(
+              f"{api}/api/v1/guard/events/checkpoint",
+              data=json.dumps(body).encode("utf-8"),
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Content-Type": "application/json",
+                  "ngrok-skip-browser-warning": "true",
+              },
+              method="POST",
+          )
+          with urllib.request.urlopen(req) as resp:
+              print(f"SSE publish HTTP {resp.status}")
+              print(resp.read().decode("utf-8", errors="replace"))
+          PY
+
       - name: Build PR comment
         if: steps.latest.outputs.http_code == '200'
         run: |
