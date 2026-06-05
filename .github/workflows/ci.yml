@@ -1,0 +1,40 @@
+name: Backend CI / CD
+
+# Phase 1 — test + deploy only (no ProxyHawk Guard yet).
+# Phase 2 adds guard checkpoint after deploy-staging (see README).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  deploy-staging:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy-wait.yml
+    with:
+      platform: ${{ vars.STAGING_DEPLOY_PLATFORM || 'render' }}
+      expected_sha: ${{ github.sha }}
+      api_url: ${{ vars.STAGING_API_URL }}
+      environment_label: staging
+    secrets:
+      DEPLOY_HOOK: ${{ secrets.STAGING_DEPLOY_HOOK }}
+      DEPLOY_API_KEY: ${{ secrets.STAGING_DEPLOY_API_KEY }}
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_STAGING }}

@@ -1,0 +1,17 @@
+{
+  "name": "guard-onboarding-backend-sandbox",
+  "version": "0.1.0",
+  "description": "Minimal API to test ProxyHawk Guard two-phase onboarding",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}

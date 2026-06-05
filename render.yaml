@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: guard-onboarding-backend-sandbox
+    runtime: docker
+    plan: free
+    autoDeploy: false
+    branch: main
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: GIT_SHA
+        fromService:
+          type: web
+          name: guard-onboarding-backend-sandbox
+          property: commitId
