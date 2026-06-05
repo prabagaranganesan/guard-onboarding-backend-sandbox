@@ -91,4 +91,4 @@ jobs:
     with:  # must match your guard job inputs
       environment: staging
       commit_sha: ${{ github.sha }}
-  secrets: inherit
+    secrets: inherit
