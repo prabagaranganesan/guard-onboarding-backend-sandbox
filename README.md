@@ -31,19 +31,20 @@ curl -sS http://127.0.0.1:3000/api/v1/profile | python3 -m json.tool
 
 ## Phase 1 — Deploy only (must be green first)
 
-1. Create GitHub repo and push this project.
-2. Deploy to Render (or your host) with **auto-deploy OFF** — use `render.yaml` in this repo.
+1. Create a **Render Web Service** from this repo (use `render.yaml`; keep **Auto-Deploy OFF**).
+2. Copy Render **Deploy Hook** URL.
 3. GitHub → **Settings → Secrets and variables → Actions**
 
 | Type | Name | Example |
 |------|------|---------|
-| **Variable** | `STAGING_DEPLOY_PLATFORM` | `render` |
-| **Variable** | `STAGING_API_URL` | `https://your-service.onrender.com` |
+| **Variable** | `STAGING_API_URL` | `https://guard-onboarding-backend-sandbox.onrender.com` |
 | **Secret** | `STAGING_DEPLOY_HOOK` | Render deploy hook URL |
 
 **Critical:** `STAGING_API_URL` must be a **Variable**, not a Secret.
 
 4. Push to `main` and verify Actions: `test → deploy-staging`.
+
+The deploy job triggers Render via hook, then polls `/api/health` until `gitSha` matches the pushed commit.
 
 ```bash
 curl -sS "$STAGING_API_URL/api/health" | python3 -m json.tool

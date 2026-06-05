@@ -10,7 +10,6 @@ on:
     branches: [main]
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
@@ -28,13 +27,53 @@ jobs:
   deploy-staging:
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    uses: ./.github/workflows/deploy-wait.yml
-    with:
-      platform: ${{ vars.STAGING_DEPLOY_PLATFORM || 'render' }}
-      expected_sha: ${{ github.sha }}
-      api_url: ${{ vars.STAGING_API_URL }}
-      environment_label: staging
-    secrets:
-      DEPLOY_HOOK: ${{ secrets.STAGING_DEPLOY_HOOK }}
-      DEPLOY_API_KEY: ${{ secrets.STAGING_DEPLOY_API_KEY }}
-      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_STAGING }}
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Trigger Render deploy
+        env:
+          DEPLOY_HOOK: ${{ secrets.STAGING_DEPLOY_HOOK }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          if [ -z "$DEPLOY_HOOK" ]; then
+            echo "::error::Missing STAGING_DEPLOY_HOOK secret."
+            echo "Render → Service → Settings → Deploy Hook → add as GitHub Actions Secret."
+            exit 1
+          fi
+          echo "Triggering deploy for commit ${EXPECTED_SHA}"
+          curl -fsSL -X POST "${DEPLOY_HOOK}&ref=${EXPECTED_SHA}" || \
+          curl -fsSL -X POST -H "Content-Type: application/json" \
+            -d "{\"ref\":\"${EXPECTED_SHA}\"}" "${DEPLOY_HOOK}"
+
+      - name: Verify /api/health gitSha matches deployed commit
+        env:
+          API_URL: ${{ vars.STAGING_API_URL }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          API_URL="${API_URL%/}"
+          if [ -z "$API_URL" ]; then
+            echo "::error::Missing STAGING_API_URL variable."
+            echo "Set as GitHub Actions Variable (not Secret):"
+            echo "  Repo → Settings → Secrets and variables → Actions → Variables"
+            echo "  Name: STAGING_API_URL"
+            echo "  Value: https://your-service.onrender.com"
+            exit 1
+          fi
+          echo "Polling ${API_URL}/api/health for gitSha=${EXPECTED_SHA}"
+          for i in $(seq 1 90); do
+            body="$(curl -fsSL "${API_URL}/api/health" 2>/dev/null || true)"
+            if [ -z "$body" ]; then
+              echo "Attempt ${i}/90: health check unreachable, retrying..."
+              sleep 5
+              continue
+            fi
+            sha="$(echo "$body" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("gitSha",""))' 2>/dev/null || true)"
+            if [ "$sha" = "$EXPECTED_SHA" ]; then
+              echo "Live commit verified: $sha"
+              exit 0
+            fi
+            echo "Attempt ${i}/90: live gitSha=${sha:-unknown}, waiting..."
+            sleep 5
+          done
+          echo "::error::Timed out waiting for gitSha=${EXPECTED_SHA} at ${API_URL}/api/health"
+          exit 1
