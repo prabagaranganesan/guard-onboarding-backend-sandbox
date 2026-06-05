@@ -10,6 +10,7 @@ on:
     branches: [main]
 
 permissions:
+  id-token: write
   contents: read
 
 jobs:
@@ -78,3 +79,11 @@ jobs:
           done
           echo "::error::Timed out waiting for gitSha=${EXPECTED_SHA} at ${API_URL}/api/health"
           exit 1
+  guard-staging:
+  needs: deploy-staging
+  if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+  uses: ./.github/workflows/guard-post-backend-deploy.yml
+  with:
+    environment: staging
+    commit_sha: ${{ github.sha }}
+  secrets: inherit
