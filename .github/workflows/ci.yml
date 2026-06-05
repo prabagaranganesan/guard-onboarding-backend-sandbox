@@ -81,14 +81,14 @@ jobs:
           exit 1
 
   guard-staging:
-    needs: deploy-staging   # must match your deploy job id
+    needs: deploy-staging
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     permissions:
       id-token: write
       contents: read
       pull-requests: write
-      uses: ./.github/workflows/guard-post-backend-deploy.yml  # must match your guard job id
-    with:  # must match your guard job inputs
+    uses: ./.github/workflows/guard-post-backend-deploy.yml
+    with:
       environment: staging
       commit_sha: ${{ github.sha }}
     secrets: inherit
