@@ -12,7 +12,7 @@ app.get("/api/health", (_req, res) => {
   res.json({
     status: "ok",
     service: "guard-onboarding-backend-sandbox",
-    version: "0.1.1",
+    version: "0.2.0",
     gitSha,
   });
 });
@@ -23,6 +23,7 @@ app.get("/api/v1/profile", (_req, res) => {
     email: "sandbox@example.com",
     name: "Sandbox User",
     plan: "trial",
+    organization: "Sandbox Co",
   });
 });
 

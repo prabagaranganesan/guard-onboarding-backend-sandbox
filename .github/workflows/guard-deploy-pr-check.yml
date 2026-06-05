@@ -376,18 +376,59 @@ jobs:
             "$runner" \
               --session-id "$PROXYHAWK_GUARD_SESSION_ID" \
               --base-url "$GUARD_BASE_URL" \
-              --submit
+              --submit 2>&1 | tee guard-runner.log
           else
             "$runner" \
               --session-id "$PROXYHAWK_GUARD_SESSION_ID" \
-              --submit
+              --submit 2>&1 | tee guard-runner.log
           fi
-          runner_exit=$?
+          runner_exit=${PIPESTATUS[0]}
           set -e
           echo "Headless runner exit code: ${runner_exit}"
           if [ "$runner_exit" -ne 0 ]; then
             echo "Continuing checkpoint flow in report-only friendly mode; final block step controls enforcement."
           fi
+
+      - name: Report new response fields for Guard dashboard
+        if: steps.mapping.outputs.matched == 'true' && steps.ctx.outputs.run_mode == 'headless'
+        run: |
+          if [ ! -f guard-runner.log ]; then
+            echo "No guard-runner.log — skip new-field report."
+            exit 0
+          fi
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          log = Path("guard-runner.log").read_text(encoding="utf-8", errors="replace")
+          fields = []
+          for line in log.splitlines():
+              m = re.search(r"warning: UNEXPECTED_FIELD: (.+?) is present in response but not in the approved baseline\.", line)
+              if m:
+                  fields.append(m.group(1).strip())
+              elif "NEW RESPONSE FIELD(S) DETECTED" in line or "Review Now to accept" in line:
+                  print(line)
+          if not fields:
+              # Also match runner summary lines: • `organization` on GET ...
+              for line in log.splitlines():
+                  m = re.match(r"\s*• `([^`]+)` on ", line)
+                  if m:
+                      fields.append(m.group(1))
+          fields = sorted(set(fields))
+          if not fields:
+              print("No new response fields detected in Guard run output.")
+          else:
+              print("")
+              print(f"🆕 Guard detected {len(fields)} new response field(s): {', '.join(fields)}")
+              print("These are additive (non-breaking) but not in your schema contract yet.")
+              print("")
+              print("👉 Next step — ProxyHawk Mac app:")
+              print("   1. Open Guard Dashboard (session must match this deploy checkpoint)")
+              print("   2. Guard auto-runs when you open the tab — or tap Run Now")
+              print("   3. Endpoints → Review Now → Accept each new field into your contract")
+              print("")
+          with open("guard_new_fields.txt", "w", encoding="utf-8") as out:
+              out.write("\n".join(fields))
+          PY
 
       - name: Trigger Guard run on Mac via silent push
         if: steps.mapping.outputs.matched == 'true' && steps.ctx.outputs.run_mode == 'mac_push'
@@ -508,18 +549,31 @@ jobs:
         run: |
           python3 - <<'PY'
           import json
+          from pathlib import Path
           marker = "<!-- proxyhawk-guard-deploy-check -->"
           with open("guard_latest_run.json", "r", encoding="utf-8") as f:
               payload = json.load(f)
           broken = int(payload.get("brokenCount", 0))
           errors = int(payload.get("errorCount", 0))
           status = "Passing" if (broken + errors) == 0 else "Failing"
+          new_fields = []
+          fields_path = Path("guard_new_fields.txt")
+          if fields_path.is_file():
+              new_fields = [ln.strip() for ln in fields_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
           body = f"""{marker}
           ## ProxyHawk Guard (Deployment Checkpoint)
 
           **{status}** for `{payload.get("sessionName","Guard Session")}`
           - Run at: `{payload.get("runAt","unknown")}`
           - Total: `{payload.get("totalCount",0)}` | OK: `{payload.get("okCount",0)}` | Broken: `{broken}` | Errors: `{errors}`
+          """
+          if new_fields:
+              listed = ", ".join(f"`{f}`" for f in new_fields)
+              body += f"""
+          ### New response fields detected
+          {listed} — not in your Guard schema contract yet (non-breaking).
+
+          **Next:** Open **ProxyHawk → Guard Dashboard → Endpoints → Review Now** to accept new fields.
           """
           with open("guard_pr_comment.md", "w", encoding="utf-8") as out:
               out.write(body)

@@ -38,4 +38,5 @@ test("GET /api/v1/profile returns profile payload", async () => {
   const res = await request("/api/v1/profile");
   assert.equal(res.status, 200);
   assert.equal(res.body.email, "sandbox@example.com");
+  assert.equal(res.body.organization, "Sandbox Co");
 });
