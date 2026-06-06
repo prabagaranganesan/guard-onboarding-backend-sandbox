@@ -22,7 +22,6 @@ app.get("/api/v1/profile", (_req, res) => {
     id: "user-sandbox-1",
     email: "sandbox@example.com",
     name: "Sandbox User",
-    plan: "trial",
     organization: "Sandbox Co",
   });
 });
